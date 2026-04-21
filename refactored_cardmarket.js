@@ -1,25 +1,45 @@
 // ==UserScript==
 // @name         Cardmarket Refactored
 // @namespace    http://tampermonkey.net/
-// @version      6.5
+// @version      6.6
 // @description  Preloads daily price-guide data, renders ratios immediately, and loads graphs on demand.
 // @author       ggmaniack
 // @homepage     https://github.com/ggmaniack/cm-scripts
 // @supportURL   https://github.com/ggmaniack/cm-scripts/issues
 // @downloadURL  https://github.com/ggmaniack/cm-scripts/raw/main/refactored_cardmarket.js
 // @updateURL    https://github.com/ggmaniack/cm-scripts/raw/main/refactored_cardmarket.js
-// @match        https://www.cardmarket.com/en/Magic/Users/*/Offers/*
-// @match        https://www.cardmarket.com/en/Magic/ShoppingCart
-// @match        https://www.cardmarket.com/en/Magic/Products/Singles/*/*
+// @require      https://github.com/ggmaniack/cm-scripts/raw/main/draggable_box.js
+// @require      https://github.com/ggmaniack/cm-scripts/raw/main/cardmarket_path_utils.js
+// @match        https://www.cardmarket.com/*/*/Users/*/Offers/*
+// @match        https://www.cardmarket.com/*/*/ShoppingCart*
+// @match        https://www.cardmarket.com/*/*/Products/Singles/*/*
 // @grant        GM_log
 // @grant        GM_xmlhttpRequest
-// @grant        unsafeWindow
 // @connect      downloads.s3.cardmarket.com
 // @run-at       document-start
 // ==/UserScript==
 
 (async function () {
     'use strict';
+
+    const pathUtils = globalThis.cardmarketPathUtils;
+    if (!pathUtils) {
+        throw new Error('cardmarketPathUtils is unavailable. Check the @require metadata for cardmarket_path_utils.js.');
+    }
+
+    const {
+        isOffersPath,
+        isCartPath,
+        isProductPath,
+        isProductUrl,
+        isUserUrl
+    } = pathUtils;
+    const draggableBoxUtils = globalThis.draggableBoxUtils;
+    if (!draggableBoxUtils || typeof draggableBoxUtils.attachDraggableBoxIcon !== 'function') {
+        throw new Error('draggableBoxUtils is unavailable. Check the @require metadata for draggable_box.js.');
+    }
+
+    const { attachDraggableBoxIcon } = draggableBoxUtils;
 
     // Constants
     const PRICE_GUIDE_CACHE_VERSION = 1;
@@ -115,15 +135,33 @@
     }
 
     function isOffersPage() {
-        return /\/Users\/[^/]+\/Offers\//.test(location.pathname);
+        return isOffersPath(location.pathname);
     }
 
     function isCartPage() {
-        return location.pathname.includes('/en/Magic/ShoppingCart');
+        return isCartPath(location.pathname);
     }
 
     function isProductPage() {
-        return /^\/en\/Magic\/Products\/Singles\/[^/]+\/[^/]+\/?$/.test(location.pathname);
+        return isProductPath(location.pathname);
+    }
+
+    function findMatchingLink(root, matcher) {
+        if (!root) return null;
+
+        const links = root.querySelectorAll('a[href]');
+        for (const link of links) {
+            if (matcher(link.href)) return link;
+        }
+        return null;
+    }
+
+    function findProductLink(root) {
+        return findMatchingLink(root, isProductUrl);
+    }
+
+    function findUserLink(root) {
+        return findMatchingLink(root, isUserUrl);
     }
 
     function initializeProductPageCache(attempt = 0) {
@@ -290,7 +328,7 @@
 
     function addPerLineFetchButtons(rowSelector, targetSelector) {
         document.querySelectorAll(rowSelector).forEach(row => {
-            const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+            const link = findProductLink(row);
             const target = row.querySelector(targetSelector);
             if (!link || !target) return;
 
@@ -308,7 +346,7 @@
     function addCartPerLineFetchButtons() {
         document.querySelectorAll('table.article-table.product-table').forEach(table => {
             table.querySelectorAll('tbody tr[data-article-id]').forEach(row => {
-                const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+                const link = findProductLink(row);
                 const infoCell = row.querySelector('td.info');
                 if (!link || !infoCell) return;
 
@@ -378,7 +416,7 @@
             const cartRows = Array.from(seller.querySelectorAll('table.article-table.product-table tbody tr[data-article-id]'));
             let sellerAverage = 0, sellerTrend = 0;
             cartRows.forEach(row => {
-                const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+                const link = findProductLink(row);
                 if (!link) return;
                 const productUrl = buildProductUrl(link.href, [getFoilState(row)]);
                 const data = urlData[productUrl];
@@ -450,12 +488,9 @@
         const bindAndShow = (htmlStr) => {
             const chart = createElementFromHTML(htmlStr);
             const productName = getProductName(row) + (getFoilBool(row) ? ' ⭐' : '');
-            if (typeof unsafeWindow.attachDraggableBoxIcon === 'function') {
-                unsafeWindow.attachDraggableBoxIcon(graphBtn, chart, productName);
-                graphBtn.dataset.graphBound = '1';
-                // Trigger draggable_box's click handler to show the box immediately.
-                graphBtn.dispatchEvent(new MouseEvent('click', { bubbles: false }));
-            }
+            attachDraggableBoxIcon(graphBtn, chart, productName);
+            graphBtn.dataset.graphBound = '1';
+            graphBtn.dispatchEvent(new MouseEvent('click', { bubbles: false }));
         };
 
         const cached = rowChartHtmlMap.get(row);
@@ -488,11 +523,11 @@
     function bindGraphButtonIfReady(row, graphBtn) {
         if (!graphBtn || graphBtn.dataset.graphBound === '1') return false;
         const chartHtml = rowChartHtmlMap.get(row);
-        if (!chartHtml || typeof unsafeWindow.attachDraggableBoxIcon !== 'function') return false;
+        if (!chartHtml) return false;
 
         const chart = createElementFromHTML(chartHtml);
         const productName = getProductName(row) + (getFoilBool(row) ? ' ⭐' : '');
-        unsafeWindow.attachDraggableBoxIcon(graphBtn, chart, productName);
+        attachDraggableBoxIcon(graphBtn, chart, productName);
         graphBtn.dataset.graphBound = '1';
         return true;
     }
@@ -650,7 +685,7 @@
         const urlData = {};
         const startedAt = Date.now();
         const rowEntries = rows.map(row => {
-            const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+            const link = findProductLink(row);
             if (!link) return null;
             const productUrl = buildProductUrl(link.href, [getFoilState(row)]);
             const productContext = resolveProductContext({ row, link }, productUrl);
@@ -699,7 +734,7 @@
         const fetchNeeded = [];
 
         Promise.all(articleRows.map(async row => {
-            const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+            const link = findProductLink(row);
             if (!link) return;
 
             const productUrl = buildProductUrl(link.href, [getFoilState(row)]);
@@ -788,7 +823,7 @@
         }
 
         const row = queue.shift();
-        const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+        const link = findProductLink(row);
         if (!link) return processQueueWaitForLoad(queue, finishCallback, progressData);
 
         const productUrl = buildProductUrl(link.href, [getFoilState(row)]);
@@ -879,7 +914,7 @@
             }
 
             const row = queue.shift();
-            const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+            const link = findProductLink(row);
             if (!link) {
                 scheduleNext(requestDelay);
                 maybeFinish();
@@ -1005,11 +1040,11 @@
     }
 
     function getProductName(row) {
-        const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+        const link = findProductLink(row);
         if (!isCartPage()) return link?.textContent.trim() || 'chart';
         
         const parent = row.closest('.card-body');
-        const seller = parent?.querySelector('.seller-info a[href*="/en/Magic/Users/"]')?.textContent.trim() || '';
+        const seller = findUserLink(parent?.querySelector('.seller-info'))?.textContent.trim() || '';
         return seller ? `${seller} - ${link?.textContent.trim() || ''}` : link?.textContent.trim() || 'chart';
     }
 
@@ -1491,7 +1526,7 @@
 
     function resolveProductContext(context = {}, productUrl = '') {
         const row = context.row || null;
-        const link = context.link || row?.querySelector('a[href*="/en/Magic/Products/"]') || null;
+        const link = context.link || findProductLink(row) || null;
         const idProduct = parsePositiveInteger(context.idProduct) || extractProductIdFromRow(row, link);
 
         let isFoil = Boolean(context.isFoil);
@@ -1545,7 +1580,7 @@
         const uniqueIds = new Set();
 
         rows.forEach(row => {
-            const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+            const link = findProductLink(row);
             if (!link) return;
             const idProduct = extractProductIdFromRow(row, link);
             if (idProduct) uniqueIds.add(idProduct);
@@ -1693,7 +1728,7 @@
     }
 
     function applyPriceGuideToRow(row) {
-        const link = row.querySelector('a[href*="/en/Magic/Products/"]');
+        const link = findProductLink(row);
         if (!link) return false;
 
         const idProduct = extractProductIdFromRow(row, link);
