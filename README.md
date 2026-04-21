@@ -13,15 +13,16 @@ Tampermonkey scripts and helper libraries for Cardmarket.
 ## Installation
 
 1. Install the [Tampermonkey browser extension](https://www.tampermonkey.net/).
-2. Open the raw install URL for [`refactored_cardmarket.js`](https://github.com/ggmaniack/cm-scripts/raw/main/refactored_cardmarket.js).
-3. When Tampermonkey opens the installation prompt, confirm the install.
-4. Open the supported Cardmarket pages and use the script there.
+2. In Tampermonkey, choose **Utilities** -> **Import from URL**.
+3. Paste this URL: `https://github.com/ggmaniack/cm-scripts/raw/main/refactored_cardmarket.js`
+4. Confirm the import and save the script.
+5. Open the supported Cardmarket pages and use the script there.
 
 ## Script details
 
 ### `refactored_cardmarket.js`
 
-The main Cardmarket enhancement script. It preloads price-guide data, shows ratios immediately, and loads graphs on demand. Its helper libraries are fetched automatically through Tampermonkey `@require` metadata, so this is the only file you need to install.
+The main Cardmarket enhancement script. It preloads price-guide data, shows ratios immediately, and loads graphs on demand. Its helper libraries are fetched automatically through Tampermonkey `@require` metadata, so this is the only file you need to install. The most reliable install path is Tampermonkey's **Import from URL** using the raw GitHub URL below.
 
 - Install: <https://github.com/ggmaniack/cm-scripts/raw/main/refactored_cardmarket.js>
 
